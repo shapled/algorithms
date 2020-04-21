@@ -24,6 +24,7 @@ type Node struct {
 	Keys		[]int		// Max Length: M-1
 	Children	[]*Node		// Max Length: M
 	Parent		*Node
+	Dup			[]*Node		// 重复节点，保证树本身无重复节点，可以最快的速度索引
 }
 
 func NewBTree(values []int) *Node {
@@ -37,8 +38,41 @@ func NewBTree(values []int) *Node {
 	return root
 }
 
-func (root *Node) Insert(value int) {
+func (root *Node) Search(value int) (bool, *Node) {
+	if root == nil {
+		return false, &Node{}
+	}
+	for i, key := range root.Keys {
+		if value == key {
+			return true, root
+		} else if value < key {
+			if i < len(root.Children) {
+				return root.Children[i].Search(value)
+			} else {
+				return false, root
+			}
+		}
+	}
+	if len(root.Children) > len(root.Keys) {
+		return root.Children[len(root.Children)-1].Search(value)
+	}
+	return false, root
+}
 
+func (root *Node) Insert(value int) *Node{
+	ok, node := root.Search(value)
+	if ok {
+		newNode := &Node{
+			Keys:     []int{value},
+			Children: nil,
+			Parent:   nil,
+			Dup:      nil,
+		}
+		node.Dup = append(node.Dup, newNode)
+		return newNode
+	}
+	node.Keys = append(node.Keys, value)
+	return node
 }
 
 func (root *Node) String() string {
