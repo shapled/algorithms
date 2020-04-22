@@ -1,6 +1,7 @@
 package btree
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -14,10 +15,13 @@ M 阶 b-tree
 5. 所有叶子结点都位于同一层，或者说根结点到每个叶子结点的长度都相同。
 
 代码参考： https://blog.csdn.net/qq_36183935/article/details/80382490
+
+感受：
+1. 之前学的树算法都是想办法操作子节点，这个倒好，操作起父节点了，优秀！
 */
 
 const (
-	M	= 10
+	M	= 3		// 不小于 2
 )
 
 type Node struct {
@@ -33,7 +37,7 @@ func NewBTree(values []int) *Node {
 	}
 	root := &Node{Keys:[]int{values[0]}}
 	for _, value := range values[1:] {
-		root.Insert(value)
+		root = root.Insert(value)
 	}
 	return root
 }
@@ -59,7 +63,8 @@ func (root *Node) Search(value int) (bool, *Node) {
 	return false, root
 }
 
-func (root *Node) Insert(value int){
+// Insert 后根节点是可能发生变化的，需要接收返回值
+func (root *Node) Insert(value int) *Node {
 	ok, node := root.Search(value)
 	if ok {
 		newNode := &Node{
@@ -69,12 +74,14 @@ func (root *Node) Insert(value int){
 			Dup:      nil,
 		}
 		node.Dup = append(node.Dup, newNode)
-		return
+		return root
 	}
 	root.insertKey(value)
-	if len(root.Keys) >= M {
-		root.Split()
+	fmt.Println(root.Keys)
+	if len(root.Keys) >= M + 1 {
+		return root.Split()
 	}
+	return root
 }
 
 func (root *Node) insertKey(value int) {
@@ -118,6 +125,39 @@ func (root *Node) String() string {
 	return strings.Join(outputTexts, "\n")
 }
 
-func (root *Node) Split() {
-
+func (root *Node) Split() *Node {
+	node := root
+	for len(node.Keys) >= M + 1 {
+		// 选择某个 key 提起来当爹
+		parent := node.Parent
+		if parent == nil {
+			parent = &Node{Children:[]*Node{node}}
+			node.Parent = parent
+		}
+		sibling := &Node{}
+		i := len(node.Keys) / 2 + 1
+		// 定位当前节点在父节点中的 child 索引，加 key 加 child
+		for j, child := range parent.Children {
+			if child == node {
+				elements := append([]int{node.Keys[i]}, parent.Keys[j:]...)
+				parent.Keys = append(parent.Keys[:j], elements...)
+				children := append([]*Node{sibling}, parent.Children[j+1:]...)
+				parent.Children = append(parent.Children[:j+1], children...)
+				break
+			}
+		}
+		// key 的变化，右半子节点过继给分裂后的兄弟
+		if i + 1 < len(node.Keys) {
+			sibling.Keys = node.Keys[i+1:]
+		}
+		node.Keys = node.Keys[:i]
+		// child 的变化，右半子节点过继给分裂后的兄弟
+		if i + 1 < len(node.Children) {
+			sibling.Children = node.Children[i+1:]
+			node.Children = node.Children[:i+1]
+		}
+		// 是否需要继续分裂
+		node = parent
+	}
+	return root
 }
