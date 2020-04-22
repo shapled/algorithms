@@ -59,7 +59,7 @@ func (root *Node) Search(value int) (bool, *Node) {
 	return false, root
 }
 
-func (root *Node) Insert(value int) *Node{
+func (root *Node) Insert(value int){
 	ok, node := root.Search(value)
 	if ok {
 		newNode := &Node{
@@ -69,10 +69,27 @@ func (root *Node) Insert(value int) *Node{
 			Dup:      nil,
 		}
 		node.Dup = append(node.Dup, newNode)
-		return newNode
+		return
 	}
-	node.Keys = append(node.Keys, value)
-	return node
+	root.insertKey(value)
+	if len(root.Keys) >= M {
+		root.Split()
+	}
+}
+
+func (root *Node) insertKey(value int) {
+	for i, key := range root.Keys {
+		if value < key {
+			end := i-1
+			if end < 0 {
+				end = 0
+			}
+			elements := append([]int{value}, root.Keys[i:]...)
+			root.Keys = append(root.Keys[:end], elements...)
+			return
+		}
+	}
+	root.Keys = append(root.Keys, value)
 }
 
 func (root *Node) String() string {
@@ -99,4 +116,8 @@ func (root *Node) String() string {
 		outputTexts = append(outputTexts, strings.Join(layerTexts, " "))
 	}
 	return strings.Join(outputTexts, "\n")
+}
+
+func (root *Node) Split() {
+
 }
