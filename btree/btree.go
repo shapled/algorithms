@@ -1,7 +1,6 @@
 package btree
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -20,144 +19,207 @@ M 阶 b-tree
 1. 之前学的树算法都是想办法操作子节点，这个倒好，操作起父节点了，优秀！
 */
 
-const (
-	M	= 3		// 不小于 2
+const M = 3
+
+type (
+	Node struct {
+		IsLeaf		bool
+		KeyCount	int
+		Keys		[M]int			//	不得超过 M-1，最后一个位置是为了方便切分前写出
+		Children	[M+1]*Node		//	不得超过 M，理由同上
+		Parent		*Node
+	}
 )
 
-type Node struct {
-	Keys		[]int		// Max Length: M-1
-	Children	[]*Node		// Max Length: M
-	Parent		*Node
-	Dup			[]*Node		// 重复节点，保证树本身无重复节点，可以最快的速度索引
+func NewBTree(values ...int) *Node {
+	tree := &Node{IsLeaf:true}
+	for _, value := range values {
+		tree = tree.Insert(value)
+	}
+	return tree
 }
 
-func NewBTree(values []int) *Node {
-	if len(values) == 0 {
-		return nil
-	}
-	root := &Node{Keys:[]int{values[0]}}
-	for _, value := range values[1:] {
-		root = root.Insert(value)
-	}
-	return root
-}
-
-func (root *Node) Search(value int) (bool, *Node) {
-	if root == nil {
-		return false, &Node{}
-	}
-	for i, key := range root.Keys {
-		if value == key {
-			return true, root
-		} else if value < key {
-			if i < len(root.Children) {
-				return root.Children[i].Search(value)
+func (node *Node) Search(value int) (bool, *Node, int) {
+	for i:=0; i<node.KeyCount; i++ {
+		if value == node.Keys[i] {
+			return true, node, i
+		} else if value < node.Keys[i] {
+			if node.IsLeaf {
+				return false, node, i
 			} else {
-				return false, root
+				return node.Children[i].Search(value)
 			}
 		}
 	}
-	if len(root.Children) > len(root.Keys) {
-		return root.Children[len(root.Children)-1].Search(value)
+	if node.IsLeaf {
+		return false, node, node.KeyCount
+	} else {
+		return node.Children[node.KeyCount].Search(value)
 	}
-	return false, root
 }
 
-// Insert 后根节点是可能发生变化的，需要接收返回值
 func (root *Node) Insert(value int) *Node {
-	ok, node := root.Search(value)
-	if ok {
-		newNode := &Node{
-			Keys:     []int{value},
-			Children: nil,
-			Parent:   nil,
-			Dup:      nil,
-		}
-		node.Dup = append(node.Dup, newNode)
+	found, n, index := root.Search(value)
+	if found {
 		return root
 	}
-	root.insertKey(value)
-	fmt.Println(root.Keys)
-	if len(root.Keys) >= M + 1 {
-		return root.Split()
+	for i:=n.KeyCount-1; i>=index; i-- {
+		n.Keys[i+1] = n.Keys[i]
+	}
+	n.Keys[index] = value
+	n.KeyCount += 1
+	if n.KeyCount > M - 1 {
+		n.Split()
+	}
+	for root.Parent != nil {
+		root = root.Parent
 	}
 	return root
 }
 
-func (root *Node) insertKey(value int) {
-	for i, key := range root.Keys {
-		if value < key {
-			end := i-1
-			if end < 0 {
-				end = 0
-			}
-			elements := append([]int{value}, root.Keys[i:]...)
-			root.Keys = append(root.Keys[:end], elements...)
-			return
+func (node *Node) Split() *Node {
+	pos := (M - 1) / 2
+	parent := node.Parent
+	if parent == nil {
+		parent = &Node{
+			IsLeaf:   false,
+			KeyCount: 0,
+			Keys:     [M]int{},
+			Children: [M+1]*Node{node},
+			Parent:   nil,
+		}
+		node.Parent = parent
+	}
+	sibling := &Node{
+		IsLeaf:   node.IsLeaf,
+		KeyCount: 0,
+		Keys:     [M]int{},
+		Children: [M+1]*Node{},
+		Parent:   parent,
+	}
+	posParent := 0
+	for ; posParent<parent.KeyCount; posParent++ {
+		if node.Keys[pos] < parent.Keys[posParent] {
+			break
 		}
 	}
-	root.Keys = append(root.Keys, value)
+	for i:=parent.KeyCount-1; i>=posParent; i-- {
+		parent.Keys[i+1] = parent.Keys[i]
+		parent.Children[i+2] = parent.Children[i+1]
+	}
+	parent.Keys[posParent] = node.Keys[pos]
+	parent.Children[posParent+1] = sibling
+	parent.KeyCount += 1
+	for i:=pos+1; i<node.KeyCount; i++ {
+		sibling.Keys[sibling.KeyCount] = node.Keys[i]
+		sibling.Children[sibling.KeyCount] = node.Children[i]
+		sibling.KeyCount += 1
+	}
+	sibling.Children[node.KeyCount] = node.Children[node.KeyCount]
+	node.KeyCount = pos
+	if parent.KeyCount > M - 1 {
+		return parent.Split()
+	}
+	return parent
+}
+
+func (node *Node) Delete(value int) (bool, *Node) {
+	found, n, index := node.Search(value)
+	if !found {
+		return false, node
+	}
+	leaf := n
+	for !leaf.IsLeaf {
+		index = 0
+		leaf = leaf.Children[index]
+	}
+	for i:=1; i<leaf.KeyCount; i++ {
+		leaf.Keys[i] = leaf.Keys[i+1]
+	}
+	leaf.KeyCount -= 1
+	if leaf.KeyCount < (M - 1) / 2 {
+		leaf.Merge(value)
+	}
+	root := leaf
+	for root.Parent != nil {
+		root = root.Parent
+	}
+	return true, root
+}
+
+// base 用于当前节点没有 key 时确定此节点在父节点中的位置
+func (node *Node) Merge(base int) {
+	parent := node.Parent
+	if parent == nil {
+		for node.KeyCount == 0 && !node.IsLeaf {
+			node = node.Children[0]
+			node.Parent = nil
+		}
+		return
+	}
+	if node.KeyCount > 0 {
+		base = node.Keys[0]
+	}
+	posParent := 0
+	for ; posParent<parent.KeyCount; posParent++ {
+		if base < parent.Keys[posParent] {
+			break
+		}
+	}
+	leftSibling := posParent - 1
+	rightSibling := posParent + 1
+	if leftSibling > 0 && parent.Children[leftSibling].KeyCount < (M - 1) / 2 {
+		left := parent.Children[leftSibling]
+		left.Keys[left.KeyCount] = parent.Keys[leftSibling]
+		for i:=0; i<=node.KeyCount; i++ {
+			if i != node.KeyCount {
+				left.Keys[left.KeyCount+1+i] = node.Keys[i]
+			}
+			left.Children[left.KeyCount+1+i] = node.Children[i]
+		}
+		left.KeyCount += 1 + node.KeyCount
+		for i:=leftSibling; i<parent.KeyCount-1; i++ {
+			parent.Keys[i] = parent.Keys[i+1]
+			parent.Children[i+1] = parent.Children[i+1]
+		}
+		parent.KeyCount -= 1
+		if parent.KeyCount < (M - 1) / 2 {
+			parent.Merge(base)
+		}
+	} else if rightSibling <= parent.KeyCount && parent.Children[rightSibling].KeyCount < (M - 1) / 2 {
+
+		if parent.KeyCount < (M - 1) / 2 {
+			parent.Merge(base)
+		}
+	} else if leftSibling > 0 {
+
+	} else if rightSibling <= parent.KeyCount {
+
+	}
 }
 
 func (root *Node) String() string {
-	nodes			:= []*Node{root}
-	nextLayerNodes	:= make([]*Node, 0, 0)
-	outputTexts		:= make([]string, 0, 0)
+	nodes := []*Node{root}
+	outputTexts := make([]string, 0, 0)
 	for len(nodes) != 0 {
+		nextLayerNodes := make([]*Node, 0, 0)
 		layerTexts := make([]string, 0, 0)
 		for _, node := range nodes {
 			nodeTexts := make([]string, 0, 0)
-			for i:=0; i<len(node.Keys) || i<len(node.Children); i++ {
-				if i < len(node.Children) {
+			for i := 0; i <= node.KeyCount; i++ {
+				if !node.IsLeaf {
 					child := node.Children[i]
 					nodeTexts = append(nodeTexts, "o")
 					nextLayerNodes = append(nextLayerNodes, child)
 				}
-				if i < len(node.Keys) {
+				if i != node.KeyCount {
 					nodeTexts = append(nodeTexts, strconv.Itoa(node.Keys[i]))
 				}
 			}
-			layerTexts = append(layerTexts, "(" + strings.Join(nodeTexts, ", ") + ")")
+			layerTexts = append(layerTexts, "("+strings.Join(nodeTexts, ", ")+")")
 		}
 		nodes = nextLayerNodes
 		outputTexts = append(outputTexts, strings.Join(layerTexts, " "))
 	}
 	return strings.Join(outputTexts, "\n")
-}
-
-func (root *Node) Split() *Node {
-	node := root
-	for len(node.Keys) >= M + 1 {
-		// 选择某个 key 提起来当爹
-		parent := node.Parent
-		if parent == nil {
-			parent = &Node{Children:[]*Node{node}}
-			node.Parent = parent
-		}
-		sibling := &Node{}
-		i := len(node.Keys) / 2 + 1
-		// 定位当前节点在父节点中的 child 索引，加 key 加 child
-		for j, child := range parent.Children {
-			if child == node {
-				elements := append([]int{node.Keys[i]}, parent.Keys[j:]...)
-				parent.Keys = append(parent.Keys[:j], elements...)
-				children := append([]*Node{sibling}, parent.Children[j+1:]...)
-				parent.Children = append(parent.Children[:j+1], children...)
-				break
-			}
-		}
-		// key 的变化，右半子节点过继给分裂后的兄弟
-		if i + 1 < len(node.Keys) {
-			sibling.Keys = node.Keys[i+1:]
-		}
-		node.Keys = node.Keys[:i]
-		// child 的变化，右半子节点过继给分裂后的兄弟
-		if i + 1 < len(node.Children) {
-			sibling.Children = node.Children[i+1:]
-			node.Children = node.Children[:i+1]
-		}
-		// 是否需要继续分裂
-		node = parent
-	}
-	return root
 }
