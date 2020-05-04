@@ -58,6 +58,13 @@ func (node *Node) Search(value int) (bool, *Node, int) {
 	}
 }
 
+func (node *Node) Root() *Node {
+	for node.Parent != nil {
+		node = node.Parent
+	}
+	return node
+}
+
 func (root *Node) Insert(value int) *Node {
 	found, n, index := root.Search(value)
 	if found {
@@ -69,10 +76,7 @@ func (root *Node) Insert(value int) *Node {
 	n.Keys[index] = value
 	n.KeyCount += 1
 	if n.KeyCount > M - 1 {
-		n.Split()
-	}
-	for root.Parent != nil {
-		root = root.Parent
+		root = n.Split()
 	}
 	return root
 }
@@ -110,52 +114,60 @@ func (node *Node) Split() *Node {
 	parent.Keys[posParent] = node.Keys[pos]
 	parent.Children[posParent+1] = sibling
 	parent.KeyCount += 1
-	for i:=pos+1; i<node.KeyCount; i++ {
-		sibling.Keys[sibling.KeyCount] = node.Keys[i]
-		sibling.Children[sibling.KeyCount] = node.Children[i]
-		sibling.KeyCount += 1
+	for i:=pos+1; i<=node.KeyCount; i++ {
+		if !sibling.IsLeaf {
+			sibling.Children[sibling.KeyCount] = node.Children[i]
+			sibling.Children[sibling.KeyCount].Parent = sibling
+		}
+		if i != node.KeyCount {
+			sibling.Keys[sibling.KeyCount] = node.Keys[i]
+			sibling.KeyCount += 1
+		}
 	}
-	sibling.Children[node.KeyCount] = node.Children[node.KeyCount]
 	node.KeyCount = pos
 	if parent.KeyCount > M - 1 {
 		return parent.Split()
 	}
+	for parent.Parent != nil {
+		parent = parent.Parent
+	}
 	return parent
 }
 
-func (node *Node) Delete(value int) (bool, *Node) {
-	found, n, index := node.Search(value)
+func (root *Node) Delete(value int) (bool, *Node) {
+	found, n, index := root.Search(value)
 	if !found {
-		return false, node
+		return false, root
 	}
 	leaf := n
-	for !leaf.IsLeaf {
+	if !n.IsLeaf {
+		leaf = n.Children[index+1]
+		for !leaf.IsLeaf {
+			leaf = leaf.Children[0]
+		}
+		n.Keys[index] = leaf.Keys[0]
+		leaf.Keys[0] = value
 		index = 0
-		leaf = leaf.Children[index]
 	}
-	for i:=1; i<leaf.KeyCount; i++ {
+	for i:=index; i<leaf.KeyCount; i++ {
 		leaf.Keys[i] = leaf.Keys[i+1]
 	}
 	leaf.KeyCount -= 1
 	if leaf.KeyCount < (M - 1) / 2 {
-		leaf.Merge(value)
-	}
-	root := leaf
-	for root.Parent != nil {
-		root = root.Parent
+		root = leaf.Merge(value)
 	}
 	return true, root
 }
 
 // base 用于当前节点没有 key 时确定此节点在父节点中的位置
-func (node *Node) Merge(base int) {
+func (node *Node) Merge(base int) *Node {
 	parent := node.Parent
 	if parent == nil {
 		for node.KeyCount == 0 && !node.IsLeaf {
 			node = node.Children[0]
 			node.Parent = nil
 		}
-		return
+		return node
 	}
 	if node.KeyCount > 0 {
 		base = node.Keys[0]
@@ -168,34 +180,72 @@ func (node *Node) Merge(base int) {
 	}
 	leftSibling := posParent - 1
 	rightSibling := posParent + 1
-	if leftSibling > 0 && parent.Children[leftSibling].KeyCount < (M - 1) / 2 {
+	if leftSibling >= 0 && parent.Children[leftSibling].KeyCount <= (M - 1) / 2 {
+		parent.mergeNode(leftSibling)
+		if parent.KeyCount < (M - 1) / 2 {
+			node = parent.Merge(base)
+		}
+	} else if rightSibling <= parent.KeyCount && parent.Children[rightSibling].KeyCount <= (M - 1) / 2 {
+		parent.mergeNode(posParent)
+		if parent.KeyCount < (M - 1) / 2 {
+			node = parent.Merge(base)
+		}
+	} else if leftSibling >= 0 {
 		left := parent.Children[leftSibling]
-		left.Keys[left.KeyCount] = parent.Keys[leftSibling]
-		for i:=0; i<=node.KeyCount; i++ {
+		for i:=node.KeyCount; i>0; i-- {
+			node.Children[i+1] = node.Children[i]
 			if i != node.KeyCount {
-				left.Keys[left.KeyCount+1+i] = node.Keys[i]
+				node.Keys[i+1] = node.Keys[i]
 			}
-			left.Children[left.KeyCount+1+i] = node.Children[i]
 		}
-		left.KeyCount += 1 + node.KeyCount
-		for i:=leftSibling; i<parent.KeyCount-1; i++ {
-			parent.Keys[i] = parent.Keys[i+1]
-			parent.Children[i+1] = parent.Children[i+1]
+		node.Keys[0] = parent.Keys[leftSibling]
+		node.Children[0] = left.Children[left.KeyCount]
+		if node.Children[0] != nil {
+			node.Children[0].Parent = node
 		}
-		parent.KeyCount -= 1
-		if parent.KeyCount < (M - 1) / 2 {
-			parent.Merge(base)
-		}
-	} else if rightSibling <= parent.KeyCount && parent.Children[rightSibling].KeyCount < (M - 1) / 2 {
-
-		if parent.KeyCount < (M - 1) / 2 {
-			parent.Merge(base)
-		}
-	} else if leftSibling > 0 {
-
+		node.KeyCount += 1
+		parent.Keys[leftSibling] = left.Keys[left.KeyCount-1]
+		left.KeyCount -= 1
 	} else if rightSibling <= parent.KeyCount {
-
+		right := parent.Children[rightSibling]
+		node.Keys[node.KeyCount] = parent.Keys[posParent]
+		node.Children[node.KeyCount+1] = right.Children[0]
+		if node.Children[node.KeyCount+1] != nil {
+			node.Children[node.KeyCount+1].Parent = node
+		}
+		node.KeyCount += 1
+		parent.Keys[posParent] = right.Keys[0]
+		for i:=0; i<right.KeyCount; i++ {
+			right.Children[i] = right.Children[i+1]
+			if i != right.KeyCount - 1 {
+				right.Keys[i] = right.Keys[i+1]
+			}
+		}
+		right.KeyCount -= 1
 	}
+	return node.Root()
+}
+
+// merge left and left+1
+func (node *Node) mergeNode(leftPos int) {
+	left := node.Children[leftPos]
+	right := node.Children[leftPos+1]
+	left.Keys[left.KeyCount] = node.Keys[leftPos]
+	for i:=0; i<=right.KeyCount; i++ {
+		if i != right.KeyCount {
+			left.Keys[left.KeyCount+1+i] = right.Keys[i]
+		}
+		if !right.IsLeaf {
+			left.Children[left.KeyCount+1+i] = right.Children[i]
+			left.Children[left.KeyCount+1+i].Parent = left
+		}
+	}
+	left.KeyCount += 1 + right.KeyCount
+	for i:=leftPos; i<node.KeyCount-1; i++ {
+		node.Keys[i] = node.Keys[i+1]
+		node.Children[i+1] = node.Children[i+2]
+	}
+	node.KeyCount -= 1
 }
 
 func (root *Node) String() string {
@@ -209,14 +259,20 @@ func (root *Node) String() string {
 			for i := 0; i <= node.KeyCount; i++ {
 				if !node.IsLeaf {
 					child := node.Children[i]
-					nodeTexts = append(nodeTexts, "o")
-					nextLayerNodes = append(nextLayerNodes, child)
+					if child != nil {
+						nodeTexts = append(nodeTexts, "o")
+						nextLayerNodes = append(nextLayerNodes, child)
+					}
 				}
 				if i != node.KeyCount {
 					nodeTexts = append(nodeTexts, strconv.Itoa(node.Keys[i]))
 				}
 			}
-			layerTexts = append(layerTexts, "("+strings.Join(nodeTexts, ", ")+")")
+			if node.IsLeaf {
+				layerTexts = append(layerTexts, "([leaf] "+strings.Join(nodeTexts, ", ")+")")
+			} else {
+				layerTexts = append(layerTexts, "("+strings.Join(nodeTexts, ", ")+")")
+			}
 		}
 		nodes = nextLayerNodes
 		outputTexts = append(outputTexts, strings.Join(layerTexts, " "))
